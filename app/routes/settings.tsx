@@ -21,7 +21,7 @@ import {
 import { AlertTriangle } from "lucide-react";
 import { data, isRouteErrorResponse, Link } from "react-router";
 import { db } from "~/db";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { formatPrice } from "~/lib/utils";
 
 const settingsSchema = z.object({
@@ -75,7 +75,28 @@ export async function loader({ request }: Route.LoaderArgs) {
     )
     .all();
 
+  const decidedRefundRequests = db
+    .select({
+      id: refunds.id,
+      courseTitle: courses.title,
+      status: refunds.status,
+      declineReason: refunds.declineReason,
+      resolvedAt: refunds.resolvedAt,
+    })
+    .from(refunds)
+    .innerJoin(purchases, eq(refunds.purchaseId, purchases.id))
+    .innerJoin(courses, eq(purchases.courseId, courses.id))
+    .where(
+      and(
+        eq(purchases.userId, currentUserId),
+        ne(refunds.status, RefundStatus.Open)
+      )
+    )
+    .orderBy(desc(refunds.resolvedAt))
+    .all();
+
   return {
+    decidedRefundRequests,
     user: {
       id: currentUser.id,
       name: currentUser.name,
@@ -122,7 +143,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function Settings({ loaderData }: Route.ComponentProps) {
-  const { user, openRefundRequests } = loaderData;
+  const { user, openRefundRequests, decidedRefundRequests } = loaderData;
   const fetcher = useFetcher();
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -238,6 +259,29 @@ export default function Settings({ loaderData }: Route.ComponentProps) {
                   {new Date(refundRequest.requestedAt).toLocaleDateString()}
                 </p>
                 <p className="mt-2 text-sm">{refundRequest.reason}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {decidedRefundRequests.length > 0 && (
+        <Card className="mt-8 max-w-md">
+          <CardHeader>
+            <h2 className="text-lg font-semibold">Decided Refund Requests</h2>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {decidedRefundRequests.map((refundRequest) => (
+              <div key={refundRequest.id} className="rounded-md border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="font-medium">{refundRequest.courseTitle}</span>
+                  <span className="shrink-0 text-xs font-medium capitalize">
+                    {refundRequest.status}
+                  </span>
+                </div>
+                {refundRequest.declineReason && (
+                  <p className="mt-2 text-sm">{refundRequest.declineReason}</p>
+                )}
               </div>
             ))}
           </CardContent>
